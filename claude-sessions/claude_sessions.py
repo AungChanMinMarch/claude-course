@@ -26,7 +26,9 @@ The menu (when you list sessions in a terminal):
   Home/End           first / last session
   a number           jump to that session (type 1 then 2 for no. 12)
   o                  open (continue) the highlighted session in Claude Code
-  r                  read it in the terminal, then come back to the menu
+  n                  start a brand new session instead (in this folder; with
+                     --all, in the highlighted session's folder)
+  r                read it in the terminal, then come back to the menu
   h                  open it in your browser, then come back to the menu
   d                  move it to the trash folder (asks y/n first)
   q or Esc           quit
@@ -627,7 +629,7 @@ def put(win, y, x, text, attr=0):
 def menu(stdscr, sessions, where, sel, status):
     """Draw the session menu and wait for keys.
 
-    Returns (action, sel): action is "o", "r", "h", "d", or None for quit,
+    Returns (action, sel): action is "o", "n", "r", "h", "d", or None for quit,
     and sel is the position (0 = first) of the highlighted session.
     """
     try:
@@ -681,7 +683,7 @@ def menu(stdscr, sessions, where, sel, status):
             status = f"Go to number: {digits}"
         put(stdscr, h - 2, 0, status, curses.A_BOLD)
         put(stdscr, h - 1, 0, "Up/Down move  number jump  "
-                              "o open  r read  h html  d trash  q quit")
+                              "o open  n new  r read  h html  d trash  q quit")
         stdscr.refresh()
 
         key = stdscr.getch()
@@ -709,7 +711,7 @@ def menu(stdscr, sessions, where, sel, status):
             sel = 0
         elif key == curses.KEY_END:
             sel = n - 1
-        elif key in (ord("o"), ord("r"), ord("h")):
+        elif key in (ord("o"), ord("n"), ord("r"), ord("h")):
             return chr(key), sel
         elif key == ord("d"):
             # Ask on the bottom lines. Only "y" moves; any other key cancels.
@@ -736,8 +738,12 @@ def menu(stdscr, sessions, where, sel, status):
         # any other key (or a window resize): just draw again
 
 
-def menu_mode(sessions, where):
-    """Show the menu; run read/html and come back; open leaves for Claude."""
+def menu_mode(sessions, where, new_cwd=None):
+    """Show the menu; run read/html and come back; open/new leave for Claude.
+
+    new_cwd is the folder the n key starts a new session in. If it is None
+    (the --all list), the folder of the highlighted session is used.
+    """
     locale.setlocale(locale.LC_ALL, "")        # so non-English text shows right
     os.environ.setdefault("ESCDELAY", "25")    # make Esc react quickly
     sel, status = 0, ""
@@ -751,6 +757,9 @@ def menu_mode(sessions, where):
         s = sessions[sel]
         if action == "o":
             open_mode(s["id"])                 # becomes Claude Code; no return
+            return
+        if action == "n":
+            new_mode(new_cwd or s["cwd"])      # becomes Claude Code; no return
             return
         if action == "r":
             read_mode(s["id"])
@@ -815,20 +824,29 @@ def html_mode(id_start):
     return out, opened
 
 
-def open_mode(id_start, check_git=True):
-    s = load(id_start)
-    if not s["cwd"]:
-        sys.exit("Cannot tell which folder this session was started in.")
-    if not os.path.isdir(s["cwd"]):
-        sys.exit(f"The session's folder no longer exists: {s['cwd']}")
+def launch_claude(cwd, claude_args, label, check_git=True):
+    """Check the folder, then replace this script with Claude Code running there."""
+    if not cwd:
+        sys.exit("Cannot tell which folder to use.")
+    if not os.path.isdir(cwd):
+        sys.exit(f"The folder no longer exists: {cwd}")
     if not shutil.which("claude"):
         sys.exit("The 'claude' command was not found.")
-    if check_git and not git_check(s["cwd"]):
+    if check_git and not git_check(cwd):
         sys.exit(0)
-    print(f"Opening in {short_path(s['cwd'])}: {s['name']}")
-    os.chdir(s["cwd"])
-    # Replace this script with Claude Code, running in the session's folder.
-    os.execvp("claude", ["claude", "--resume", s["id"]])
+    print(f"Opening in {short_path(cwd)}: {label}")
+    os.chdir(cwd)
+    os.execvp("claude", ["claude", *claude_args])
+
+
+def open_mode(id_start, check_git=True):
+    s = load(id_start)
+    launch_claude(s["cwd"], ["--resume", s["id"]], s["name"], check_git)
+
+
+def new_mode(cwd, check_git=True):
+    """Start a brand new Claude Code session in folder cwd."""
+    launch_claude(cwd, [], "new session", check_git)
 
 
 def plain_list(shown, total, where, hidden):
@@ -906,7 +924,7 @@ def list_mode(args):
     if args.plain or not (sys.stdin.isatty() and sys.stdout.isatty()):
         plain_list(shown, len(sessions), where, hidden)
     else:
-        menu_mode(shown, where)
+        menu_mode(shown, where, None if args.all else here)
 
 
 def main():
