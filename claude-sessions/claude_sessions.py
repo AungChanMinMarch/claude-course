@@ -8,7 +8,7 @@ never changed: this script only reads them.
 Usage:
   claude-sessions                  # menu of sessions started in this folder
   claude-sessions --all            # menu of sessions from every folder
-  claude-sessions --all siit       # every folder whose path contains "siit"
+  claude-sessions --all thesis     # every folder whose path contains "thesis"
   claude-sessions -n 50            # show up to 50 sessions (default 30)
   claude-sessions --show-empty     # also show sessions with no prompts
   claude-sessions --plain          # plain list in a pager, no menu
@@ -56,7 +56,7 @@ red = "haven't renamed yet", blue = your first prompt.
 Colours turn off by themselves when the output goes to a file or another
 program, or when the NO_COLOR environment variable is set.
 
-(If you run the file directly, use "python3 list_sessions_v2.py" instead of
+(If you run the file directly, use "python3 claude_sessions.py" instead of
 "claude-sessions".)
 
 Note: this reads Claude Code's internal file format, which is not an official
