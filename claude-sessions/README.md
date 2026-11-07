@@ -76,7 +76,8 @@ For `--read`, `--html`, and `--open`, the first 8 characters of the session id a
 | `o` | Open (continue) the highlighted session in Claude Code |
 | `n` | Start a brand new session instead of continuing one. It starts in the current folder (with `--all`: in the highlighted session's folder). The Git check runs first |
 | `r` | Read it in the terminal, then return to the menu |
-| `h` | Open it in your browser, then return to the menu |
+| `h` | Open it in your browser as a saved file, then return to the menu. The file does not change afterwards |
+| `w` | Open it as a live web page (a small server on your own computer, `127.0.0.1` only). After you ask Claude something new, refresh the browser tab to see it. The server stops when you quit the menu |
 | `d` | Move it to the trash folder (asks y/n first) |
 | `q` or Esc | Quit |
 

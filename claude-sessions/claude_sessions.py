@@ -30,6 +30,9 @@ The menu (when you list sessions in a terminal):
                      --all, in the highlighted session's folder)
   r                read it in the terminal, then come back to the menu
   h                  open it in your browser, then come back to the menu
+                     (a saved file: it does not change after that)
+  w                  open it as a live web page; after you ask Claude
+                     something new, refresh the browser tab to see it
   d                  move it to the trash folder (asks y/n first)
   q or Esc           quit
   Example: type 2 then o to open session no. 2. No Enter is needed.
@@ -74,7 +77,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 
@@ -275,14 +280,17 @@ def show_in_pager(text):
 
 
 def open_in_browser(path):
-    """Open a file in your browser. Works from WSL (Windows browser) or Linux."""
+    """Open a file or a web address in your browser. Works from WSL or Linux."""
+    is_url = str(path).startswith("http://")
     try:
         if shutil.which("wslview"):
             subprocess.run(["wslview", str(path)])
-        elif shutil.which("explorer.exe") and shutil.which("wslpath"):
+        elif not is_url and shutil.which("explorer.exe") and shutil.which("wslpath"):
             win = subprocess.run(["wslpath", "-w", str(path)],
                                  capture_output=True, text=True).stdout.strip()
             subprocess.run(["explorer.exe", win])   # its exit code is unreliable
+        elif is_url and shutil.which("explorer.exe"):
+            subprocess.run(["explorer.exe", str(path)])
         elif shutil.which("xdg-open"):
             subprocess.run(["xdg-open", str(path)])
         else:
@@ -683,7 +691,7 @@ def menu(stdscr, sessions, where, sel, status):
             status = f"Go to number: {digits}"
         put(stdscr, h - 2, 0, status, curses.A_BOLD)
         put(stdscr, h - 1, 0, "Up/Down move  number jump  "
-                              "o open  n new  r read  h html  d trash  q quit")
+                              "o open  n new  r read  h html  w web  d trash  q quit")
         stdscr.refresh()
 
         key = stdscr.getch()
@@ -711,7 +719,7 @@ def menu(stdscr, sessions, where, sel, status):
             sel = 0
         elif key == curses.KEY_END:
             sel = n - 1
-        elif key in (ord("o"), ord("n"), ord("r"), ord("h")):
+        elif key in (ord("o"), ord("n"), ord("r"), ord("h"), ord("w")):
             return chr(key), sel
         elif key == ord("d"):
             # Ask on the bottom lines. Only "y" moves; any other key cancels.
@@ -768,6 +776,10 @@ def menu_mode(sessions, where, new_cwd=None):
             path, opened = html_mode(s["id"])
             status = (f"No. {sel + 1} opened in your browser." if opened
                       else f"Could not open a browser. File: {path}")
+        elif action == "w":
+            url, opened = web_mode(s["id"])
+            status = (f"No. {sel + 1} opened in your browser. Refresh the tab to update."
+                      if opened else f"Could not open a browser. Address: {url}")
         elif action == "d":
             try:
                 dest = trash_session(s)
@@ -822,6 +834,52 @@ def html_mode(id_start):
     else:
         print("Could not open a browser. Open the file above yourself.")
     return out, opened
+
+
+_web_server = None   # the one live-page server; started the first time w is used
+
+
+class _LivePageHandler(BaseHTTPRequestHandler):
+    """Answers http://127.0.0.1:PORT/<session id> with a freshly built page."""
+
+    def do_GET(self):
+        sid = self.path.strip("/").split("?")[0]
+        ok = bool(sid) and all(c in "0123456789abcdef-" for c in sid)
+        try:
+            if not ok:
+                raise LookupError
+            s = load(sid)                          # reads the file again, every time
+            body = build_html(s, conversation(s["path"])).encode("utf-8")
+            code = 200
+        except (LookupError, SystemExit, OSError):
+            body = b"Session not found (it may have been moved to the trash)."
+            code = 404
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):                  # keep the menu screen clean
+        pass
+
+
+def web_address(session_id):
+    """Start the live-page server if needed. Returns the page address."""
+    global _web_server
+    if _web_server is None:
+        # 127.0.0.1 = only this computer can connect. Port 0 = pick a free port.
+        _web_server = ThreadingHTTPServer(("127.0.0.1", 0), _LivePageHandler)
+        threading.Thread(target=_web_server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{_web_server.server_address[1]}/{session_id}"
+
+
+def web_mode(id_start):
+    """Open a live page for one session. Returns (address, opened or not)."""
+    s = load(id_start)
+    url = web_address(s["id"])
+    return url, open_in_browser(url)
 
 
 def launch_claude(cwd, claude_args, label, check_git=True):
